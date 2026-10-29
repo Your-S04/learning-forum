@@ -10,7 +10,7 @@ const loading = ref(true)
 onMounted(async () => {
   const { data } = await supabase
     .from('problems')
-    .select('id, title, created_at, profiles(username), problem_likes(count)')
+    .select('id, title, created_at, profiles!problems_user_id_fkey(username), problem_likes(count)')
     .order('created_at', { ascending: false })
   problems.value = data ?? []
   loading.value = false

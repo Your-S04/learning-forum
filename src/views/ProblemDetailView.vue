@@ -27,12 +27,12 @@ async function load() {
   const [{ data: problemData }, { data: commentData }] = await Promise.all([
     supabase
       .from('problems')
-      .select('id, title, content, created_at, user_id, profiles(username)')
+      .select('id, title, content, created_at, user_id, profiles!problems_user_id_fkey(username)')
       .eq('id', problemId)
       .single(),
     supabase
       .from('comments')
-      .select('id, content, created_at, user_id, profiles(username)')
+      .select('id, content, created_at, user_id, profiles!comments_user_id_fkey(username)')
       .eq('problem_id', problemId)
       .order('created_at', { ascending: true }),
   ])
