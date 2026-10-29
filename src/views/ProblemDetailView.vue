@@ -16,6 +16,10 @@ const comments = ref([])
 const newComment = ref('')
 const submitting = ref(false)
 
+// 点赞状态：题目一个，讨论按 id 建映射
+const problemLike = ref({ count: 0, liked: false })
+const commentLikes = ref({}) // { [commentId]: { count, liked } }
+
 const isAdmin = computed(() => authState.profile?.role === 'admin')
 const currentUserId = computed(() => authState.session?.user.id)
 
@@ -34,12 +38,78 @@ async function load() {
   ])
   problem.value = problemData
   comments.value = commentData ?? []
+  await loadLikes()
+}
+
+async function loadLikes() {
+  const commentIds = comments.value.map((c) => c.id)
+  const { data: plData } = await supabase
+    .from('problem_likes')
+    .select('user_id')
+    .eq('problem_id', problemId)
+  problemLike.value = {
+    count: plData?.length ?? 0,
+    liked: !!plData?.some((l) => l.user_id === currentUserId.value),
+  }
+
+  const map = {}
+  for (const c of commentIds) map[c] = { count: 0, liked: false }
+  if (commentIds.length) {
+    const { data: clData } = await supabase
+      .from('comment_likes')
+      .select('comment_id, user_id')
+      .in('comment_id', commentIds)
+    for (const l of clData ?? []) {
+      map[l.comment_id].count++
+      if (l.user_id === currentUserId.value) map[l.comment_id].liked = true
+    }
+  }
+  commentLikes.value = map
 }
 
 onMounted(load)
 
 function canDelete(userId) {
   return isAdmin.value || userId === currentUserId.value
+}
+
+async function toggleProblemLike() {
+  if (problemLike.value.liked) {
+    const { error } = await supabase
+      .from('problem_likes')
+      .delete()
+      .eq('problem_id', problemId)
+      .eq('user_id', currentUserId.value)
+    if (error) return ElMessage.error(error.message)
+    problemLike.value = { count: problemLike.value.count - 1, liked: false }
+  } else {
+    const { error } = await supabase
+      .from('problem_likes')
+      .insert({ problem_id: problemId, user_id: currentUserId.value })
+    if (error) return ElMessage.error(error.message)
+    problemLike.value = { count: problemLike.value.count + 1, liked: true }
+  }
+}
+
+async function toggleCommentLike(comment) {
+  const state = commentLikes.value[comment.id]
+  if (state.liked) {
+    const { error } = await supabase
+      .from('comment_likes')
+      .delete()
+      .eq('comment_id', comment.id)
+      .eq('user_id', currentUserId.value)
+    if (error) return ElMessage.error(error.message)
+    state.liked = false
+    state.count--
+  } else {
+    const { error } = await supabase
+      .from('comment_likes')
+      .insert({ comment_id: comment.id, user_id: currentUserId.value })
+    if (error) return ElMessage.error(error.message)
+    state.liked = true
+    state.count++
+  }
 }
 
 async function submitComment() {
@@ -87,17 +157,40 @@ async function removeComment(id) {
           <el-button size="small" type="danger" plain @click="removeProblem">删除</el-button>
         </div>
       </div>
-      <div style="color: var(--el-text-color-secondary); margin: 8px 0 16px; font-size: 14px">
-        {{ problem.profiles?.username }} ·
-        {{ new Date(problem.created_at).toLocaleString('zh-CN') }}
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          color: var(--el-text-color-secondary);
+          margin: 8px 0 16px;
+          font-size: 14px;
+        "
+      >
+        <span>
+          {{ problem.profiles?.username }} ·
+          {{ new Date(problem.created_at).toLocaleString('zh-CN') }}
+        </span>
+        <el-button
+          size="small"
+          :type="problemLike.liked ? 'primary' : 'default'"
+          :disabled="problem.user_id === currentUserId"
+          @click="toggleProblemLike"
+        >
+          👍 {{ problemLike.count }}{{ problem.user_id === currentUserId ? '（自己的）' : '' }}
+        </el-button>
       </div>
       <MdPreview :modelValue="problem.content" />
     </el-card>
 
     <el-card style="margin-top: 16px">
       <h3 style="margin-top: 0">讨论（{{ comments.length }}）</h3>
-      <div v-for="c in comments" :key="c.id" style="border-top: 1px solid var(--el-border-color-lighter); padding: 12px 0">
-        <div style="display: flex; justify-content: space-between">
+      <div
+        v-for="c in comments"
+        :key="c.id"
+        style="border-top: 1px solid var(--el-border-color-lighter); padding: 12px 0"
+      >
+        <div style="display: flex; justify-content: space-between; align-items: center">
           <strong>{{ c.profiles?.username }}</strong>
           <span style="color: var(--el-text-color-secondary); font-size: 13px">
             {{ new Date(c.created_at).toLocaleString('zh-CN') }}
@@ -113,7 +206,16 @@ async function removeComment(id) {
             </el-button>
           </span>
         </div>
-        <p style="white-space: pre-wrap; margin: 8px 0 0">{{ c.content }}</p>
+        <p style="white-space: pre-wrap; margin: 8px 0">{{ c.content }}</p>
+        <el-button
+          size="small"
+          text
+          :type="commentLikes[c.id]?.liked ? 'primary' : 'default'"
+          :disabled="c.user_id === currentUserId"
+          @click="toggleCommentLike(c)"
+        >
+          👍 {{ commentLikes[c.id]?.count ?? 0 }}
+        </el-button>
       </div>
       <el-input
         v-model="newComment"

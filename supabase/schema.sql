@@ -56,11 +56,31 @@ create table board_items (
   created_at timestamptz not null default now()
 );
 
--- 5. 排行榜视图：发题 3 分 + 回复 1 分（改规则只改这里）
-create view leaderboard as
+-- 4.1 点赞：题目点赞与讨论点赞各一张表，联合主键防止重复点赞
+create table problem_likes (
+  problem_id bigint not null references problems(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (problem_id, user_id)
+);
+
+create table comment_likes (
+  comment_id bigint not null references comments(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (comment_id, user_id)
+);
+
+-- 5. 排行榜视图：发题 3 分 + 回复 1 分 + 获赞 2 分（改规则只改这里）
+create or replace view leaderboard as
 select p.id, p.username,
   (select count(*) from problems where user_id = p.id) * 3 +
-  (select count(*) from comments where user_id = p.id) * 1 as score
+  (select count(*) from comments where user_id = p.id) * 1 +
+  (select count(*) from problem_likes pl join problems pr on pr.id = pl.problem_id
+     where pr.user_id = p.id) * 2 +
+  (select count(*) from comment_likes cl join comments c on c.id = cl.comment_id
+     where c.user_id = p.id) * 2
+  as score
 from profiles p
 order by score desc;
 
@@ -99,6 +119,18 @@ create policy "board read"  on board_items for select to authenticated using (tr
 create policy "board write" on board_items for all to authenticated using (
   exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
+
+-- 点赞：人人可读（前端要数数），本人可点赞/取消
+alter table problem_likes enable row level security;
+alter table comment_likes enable row level security;
+
+create policy "problem likes read"   on problem_likes for select to authenticated using (true);
+create policy "problem likes insert" on problem_likes for insert to authenticated with check (auth.uid() = user_id);
+create policy "problem likes delete" on problem_likes for delete to authenticated using (auth.uid() = user_id);
+
+create policy "comment likes read"   on comment_likes for select to authenticated using (true);
+create policy "comment likes insert" on comment_likes for insert to authenticated with check (auth.uid() = user_id);
+create policy "comment likes delete" on comment_likes for delete to authenticated using (auth.uid() = user_id);
 
 -- ============================================================
 -- 图片存储：题目配图上传到 images 桶（公开可读，登录后可传）

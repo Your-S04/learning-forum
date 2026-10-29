@@ -10,7 +10,7 @@ const loading = ref(true)
 onMounted(async () => {
   const { data } = await supabase
     .from('problems')
-    .select('id, title, created_at, profiles(username)')
+    .select('id, title, created_at, profiles(username), problem_likes(count)')
     .order('created_at', { ascending: false })
   problems.value = data ?? []
   loading.value = false
@@ -32,6 +32,9 @@ onMounted(async () => {
       @row-click="(row) => router.push({ name: 'problem-detail', params: { id: row.id } })"
     >
       <el-table-column prop="title" label="标题" />
+      <el-table-column label="点赞" width="80" align="center">
+        <template #default="{ row }">👍 {{ row.problem_likes?.[0]?.count ?? 0 }}</template>
+      </el-table-column>
       <el-table-column label="作者" width="140">
         <template #default="{ row }">{{ row.profiles?.username }}</template>
       </el-table-column>
