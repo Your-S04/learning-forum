@@ -40,6 +40,7 @@ create table comments (
   problem_id bigint not null references problems(id) on delete cascade,
   user_id uuid not null references profiles(id) on delete cascade,
   content text not null,
+  pinned_at timestamptz,               -- 置顶时间：楼主/管理员可设置，置顶按此时间排序
   created_at timestamptz not null default now()
 );
 
@@ -105,10 +106,14 @@ create policy "problems delete" on problems for delete to authenticated using (
   or exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
 
--- comments：同 problems
+-- comments：人人可读；本人可发；本人/题目楼主/管理员可改（用于置顶）；本人或管理员可删
 create policy "comments read"   on comments for select to authenticated using (true);
 create policy "comments insert" on comments for insert to authenticated with check (auth.uid() = user_id);
-create policy "comments update" on comments for update to authenticated using (auth.uid() = user_id);
+create policy "comments update" on comments for update to authenticated using (
+  auth.uid() = user_id
+  or exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+  or exists (select 1 from problems where problems.id = comments.problem_id and problems.user_id = auth.uid())
+);
 create policy "comments delete" on comments for delete to authenticated using (
   auth.uid() = user_id
   or exists (select 1 from profiles where id = auth.uid() and role = 'admin')

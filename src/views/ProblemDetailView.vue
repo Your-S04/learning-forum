@@ -20,8 +20,16 @@ const submitting = ref(false)
 const problemLike = ref({ count: 0, liked: false })
 const commentLikes = ref({}) // { [commentId]: { count, liked } }
 
+// 讨论区：排序与筛选
+const sortBy = ref('time') // time 时间正序 | hot 热度
+const userFilter = ref('')
+
 const isAdmin = computed(() => authState.profile?.role === 'admin')
 const currentUserId = computed(() => authState.session?.user.id)
+// 楼主或管理员可以置顶回答
+const canPin = computed(
+  () => isAdmin.value || problem.value?.user_id === currentUserId.value
+)
 
 async function load() {
   const [{ data: problemData }, { data: commentData }] = await Promise.all([
@@ -32,7 +40,7 @@ async function load() {
       .single(),
     supabase
       .from('comments')
-      .select('id, content, created_at, user_id, profiles!comments_user_id_fkey(username)')
+      .select('id, content, created_at, user_id, pinned_at, profiles!comments_user_id_fkey(username)')
       .eq('problem_id', problemId)
       .order('created_at', { ascending: true }),
   ])
@@ -68,6 +76,28 @@ async function loadLikes() {
 }
 
 onMounted(load)
+
+// 展示顺序：先按置顶时间排置顶回答，其余按所选方式排序
+const displayedComments = computed(() => {
+  const kw = userFilter.value.trim().toLowerCase()
+  const list = kw
+    ? comments.value.filter((c) => c.profiles?.username?.toLowerCase().includes(kw))
+    : comments.value
+  const pinned = list
+    .filter((c) => c.pinned_at)
+    .sort((a, b) => new Date(a.pinned_at) - new Date(b.pinned_at))
+  const rest = list.filter((c) => !c.pinned_at)
+  rest.sort((a, b) => {
+    if (sortBy.value === 'hot') {
+      const diff =
+        (commentLikes.value[b.id]?.count ?? 0) -
+        (commentLikes.value[a.id]?.count ?? 0)
+      if (diff !== 0) return diff
+    }
+    return new Date(a.created_at) - new Date(b.created_at)
+  })
+  return [...pinned, ...rest]
+})
 
 function canDelete(userId) {
   return isAdmin.value || userId === currentUserId.value
@@ -110,6 +140,17 @@ async function toggleCommentLike(comment) {
     state.liked = true
     state.count++
   }
+}
+
+async function togglePin(comment) {
+  const pinned = !comment.pinned_at
+  const { error } = await supabase
+    .from('comments')
+    .update({ pinned_at: pinned ? new Date().toISOString() : null })
+    .eq('id', comment.id)
+  if (error) return ElMessage.error(error.message)
+  comment.pinned_at = pinned ? new Date().toISOString() : null
+  ElMessage.success(pinned ? '已置顶' : '已取消置顶')
 }
 
 async function submitComment() {
@@ -177,29 +218,58 @@ async function removeComment(id) {
           :disabled="problem.user_id === currentUserId"
           @click="toggleProblemLike"
         >
-          👍 {{ problemLike.count }}{{ problem.user_id === currentUserId ? '（自己的）' : '' }}
+          {{ problemLike.liked ? 'Liked' : 'Like' }} {{ problemLike.count }}
         </el-button>
       </div>
       <MdPreview :modelValue="problem.content" />
     </el-card>
 
     <el-card style="margin-top: 16px">
-      <h3 style="margin-top: 0">讨论（{{ comments.length }}）</h3>
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px">
+        <h3 style="margin: 0">讨论（{{ comments.length }}）</h3>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <el-input
+            v-model="userFilter"
+            placeholder="筛选用户回答"
+            clearable
+            style="width: 160px"
+            size="small"
+          />
+          <el-radio-group v-model="sortBy" size="small">
+            <el-radio-button value="time">时间</el-radio-button>
+            <el-radio-button value="hot">热度</el-radio-button>
+          </el-radio-group>
+        </div>
+      </div>
+
       <div
-        v-for="c in comments"
+        v-for="c in displayedComments"
         :key="c.id"
         style="border-top: 1px solid var(--el-border-color-lighter); padding: 12px 0"
       >
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <strong>{{ c.profiles?.username }}</strong>
+          <span>
+            <strong>{{ c.profiles?.username }}</strong>
+            <el-tag v-if="c.pinned_at" type="warning" size="small" style="margin-left: 8px">
+              置顶
+            </el-tag>
+          </span>
           <span style="color: var(--el-text-color-secondary); font-size: 13px">
             {{ new Date(c.created_at).toLocaleString('zh-CN') }}
+            <el-button
+              v-if="canPin"
+              link
+              size="small"
+              style="margin-left: 8px"
+              @click="togglePin(c)"
+            >
+              {{ c.pinned_at ? '取消置顶' : '置顶' }}
+            </el-button>
             <el-button
               v-if="canDelete(c.user_id)"
               link
               type="danger"
               size="small"
-              style="margin-left: 8px"
               @click="removeComment(c.id)"
             >
               删除
@@ -214,9 +284,11 @@ async function removeComment(id) {
           :disabled="c.user_id === currentUserId"
           @click="toggleCommentLike(c)"
         >
-          👍 {{ commentLikes[c.id]?.count ?? 0 }}
+          {{ commentLikes[c.id]?.liked ? 'Liked' : 'Like' }} {{ commentLikes[c.id]?.count ?? 0 }}
         </el-button>
       </div>
+      <el-empty v-if="!displayedComments.length" description="暂无讨论" :image-size="80" />
+
       <el-input
         v-model="newComment"
         type="textarea"
