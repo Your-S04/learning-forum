@@ -16,21 +16,43 @@ const pageTitle = problemId ? '编辑题目' : '发布题目'
 
 const title = ref('')
 const content = ref('')
+const tagId = ref(null) // 选中已有分类时为数字；管理员新建分类时为字符串
+const difficulty = ref(0) // 0 = 未设置；1~5 为难度星
+const tags = ref([])
 const loading = ref(false)
 const canSubmit = computed(() => title.value.trim() && content.value.trim())
+const isAdmin = computed(() => authState.profile?.role === 'admin')
 
 onMounted(async () => {
+  const { data: tagData } = await supabase.from('tags').select('id, name').order('name')
+  tags.value = tagData ?? []
   if (!problemId) return
   const { data } = await supabase
     .from('problems')
-    .select('title, content')
+    .select('title, content, tag_id, difficulty')
     .eq('id', problemId)
     .single()
   if (data) {
     title.value = data.title
     content.value = data.content
+    tagId.value = data.tag_id
+    difficulty.value = data.difficulty ?? 0
   }
 })
+
+// 选中的是新建分类名（字符串）时先入库拿到 id；重名则直接用已有 id
+async function ensureTagId(value) {
+  if (typeof value !== 'string') return value
+  const name = value.trim()
+  if (!name) return null
+  const { data: created } = await supabase.from('tags').insert({ name }).select('id').single()
+  if (created) {
+    tags.value.push({ id: created.id, name })
+    return created.id
+  }
+  const { data: exist } = await supabase.from('tags').select('id').eq('name', name).single()
+  return exist?.id ?? null
+}
 
 // md-editor-v3 的图片上传：存入 Supabase Storage 的 images 桶，拿回公网 URL
 async function onUploadImg(files, callback) {
@@ -51,16 +73,19 @@ async function onUploadImg(files, callback) {
 async function submit() {
   loading.value = true
   try {
+    const finalTagId = await ensureTagId(tagId.value)
+    const payload = {
+      title: title.value.trim(),
+      content: content.value,
+      tag_id: finalTagId,
+      difficulty: difficulty.value || null,
+    }
     if (problemId) {
-      const { error } = await supabase
-        .from('problems')
-        .update({ title: title.value.trim(), content: content.value })
-        .eq('id', problemId)
+      const { error } = await supabase.from('problems').update(payload).eq('id', problemId)
       if (error) throw error
     } else {
       const { error } = await supabase.from('problems').insert({
-        title: title.value.trim(),
-        content: content.value,
+        ...payload,
         user_id: authState.session.user.id,
       })
       if (error) throw error
@@ -84,9 +109,26 @@ async function submit() {
       maxlength="100"
       show-word-limit
     />
+    <div style="display: flex; gap: 24px; align-items: center; margin-bottom: 16px; flex-wrap: wrap">
+      <el-select
+        v-model="tagId"
+        filterable
+        :allow-create="isAdmin"
+        default-first-option
+        :placeholder="isAdmin ? '选择或输入新分类' : '选择分类'"
+        clearable
+        style="width: 220px"
+      >
+        <el-option v-for="t in tags" :key="t.id" :label="t.name" :value="t.id" />
+      </el-select>
+      <span style="display: flex; align-items: center; gap: 8px">
+        <span style="color: var(--el-text-color-secondary); font-size: 14px">难度</span>
+        <el-rate v-model="difficulty" clearable />
+      </span>
+    </div>
     <MdEditor
       v-model="content"
-      :style="{ height: '420px' }"
+      :style="{ height: '400px' }"
       :placeholder="'描述你的题目，支持 Markdown、代码块，可粘贴/上传图片'"
       @onUploadImg="onUploadImg"
     />

@@ -10,7 +10,7 @@ const loading = ref(true)
 onMounted(async () => {
   const { data } = await supabase
     .from('problems')
-    .select('id, title, created_at, profiles!problems_user_id_fkey(username), problem_likes(count)')
+    .select('id, title, created_at, profiles!problems_user_id_fkey(username), problem_likes(count), tags(name), difficulty')
     .order('created_at', { ascending: false })
   problems.value = data ?? []
   loading.value = false
@@ -32,6 +32,18 @@ onMounted(async () => {
       @row-click="(row) => router.push({ name: 'problem-detail', params: { id: row.id } })"
     >
       <el-table-column prop="title" label="标题" />
+      <el-table-column label="分类" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="row.tags?.name" size="small" type="info">{{ row.tags.name }}</el-tag>
+          <span v-else style="color: var(--el-text-color-secondary)">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="难度" width="140">
+        <template #default="{ row }">
+          <el-rate v-if="row.difficulty" :model-value="row.difficulty" disabled size="small" />
+          <span v-else style="color: var(--el-text-color-secondary)">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="Like" width="80" align="center">
         <template #default="{ row }">{{ row.problem_likes?.[0]?.count ?? 0 }}</template>
       </el-table-column>

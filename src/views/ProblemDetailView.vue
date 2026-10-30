@@ -35,7 +35,7 @@ async function load() {
   const [{ data: problemData }, { data: commentData }] = await Promise.all([
     supabase
       .from('problems')
-      .select('id, title, content, created_at, user_id, profiles!problems_user_id_fkey(username)')
+      .select('id, title, content, created_at, user_id, tag_id, difficulty, profiles!problems_user_id_fkey(username), tags(name)')
       .eq('id', problemId)
       .single(),
     supabase
@@ -211,6 +211,16 @@ async function removeComment(id) {
         <span>
           {{ problem.profiles?.username }} ·
           {{ new Date(problem.created_at).toLocaleString('zh-CN') }}
+          <el-tag v-if="problem.tags?.name" size="small" type="info" style="margin-left: 8px">
+            {{ problem.tags.name }}
+          </el-tag>
+          <el-rate
+            v-if="problem.difficulty"
+            :model-value="problem.difficulty"
+            disabled
+            size="small"
+            style="display: inline-flex; vertical-align: middle; margin-left: 8px"
+          />
         </span>
         <el-button
           size="small"

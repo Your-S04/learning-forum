@@ -25,12 +25,20 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- 2. 题目（content 存 Markdown 原文）
+-- 2. 分类标签库：所有人可读，仅管理员可增删
+create table tags (
+  id bigint generated always as identity primary key,
+  name text not null unique
+);
+
+-- 2.1 题目（content 存 Markdown 原文）
 create table problems (
   id bigint generated always as identity primary key,
   user_id uuid not null references profiles(id) on delete cascade,
   title text not null,
   content text not null,
+  tag_id bigint references tags(id),           -- 分类：由管理员维护标签库
+  difficulty int check (difficulty between 1 and 5),  -- 难度：发布者打星，1~5
   created_at timestamptz not null default now()
 );
 
@@ -104,6 +112,13 @@ create policy "problems update" on problems for update to authenticated using (a
 create policy "problems delete" on problems for delete to authenticated using (
   auth.uid() = user_id
   or exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
+
+-- tags：人人可读，仅管理员可新增
+alter table tags enable row level security;
+create policy "tags read"      on tags for select to authenticated using (true);
+create policy "tags admin add" on tags for insert to authenticated with check (
+  exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
 
 -- comments：人人可读；本人可发；本人/题目楼主/管理员可改（用于置顶）；本人或管理员可删
