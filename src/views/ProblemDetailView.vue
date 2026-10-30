@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { supabase } from '../lib/supabase'
+import { uploadImages } from '../lib/image'
 import { authState } from '../composables/useAuth'
 
 const route = useRoute()
@@ -24,6 +25,15 @@ const commentLikes = ref({}) // { [commentId]: { count, liked } }
 const sortBy = ref('time') // time 时间正序 | hot 热度
 const userFilter = ref('')
 
+// 楼中楼：正在回复的评论 + 回复内容
+const replyTo = ref(null)
+const replyText = ref('')
+const replySubmitting = ref(false)
+
+// 评论配图：本地待上传列表
+const pendingImages = ref([]) // [{ file, preview }]
+const fileInput = ref(null)
+
 const isAdmin = computed(() => authState.profile?.role === 'admin')
 const currentUserId = computed(() => authState.session?.user.id)
 // 楼主或管理员可以置顶回答
@@ -40,7 +50,7 @@ async function load() {
       .single(),
     supabase
       .from('comments')
-      .select('id, content, created_at, user_id, pinned_at, profiles!comments_user_id_fkey(username)')
+      .select('id, content, created_at, user_id, parent_id, images, pinned_at, profiles!comments_user_id_fkey(username)')
       .eq('problem_id', problemId)
       .order('created_at', { ascending: true }),
   ])
@@ -77,17 +87,20 @@ async function loadLikes() {
 
 onMounted(load)
 
-// 展示顺序：先按置顶时间排置顶回答，其余按所选方式排序
-const displayedComments = computed(() => {
+// 组织成两层树：顶层排序（置顶优先）+ 各自的楼中楼按时间排
+const commentTree = computed(() => {
   const kw = userFilter.value.trim().toLowerCase()
-  const list = kw
-    ? comments.value.filter((c) => c.profiles?.username?.toLowerCase().includes(kw))
-    : comments.value
-  const pinned = list
-    .filter((c) => c.pinned_at)
-    .sort((a, b) => new Date(a.pinned_at) - new Date(b.pinned_at))
-  const rest = list.filter((c) => !c.pinned_at)
-  rest.sort((a, b) => {
+  const match = (c) => !kw || c.profiles?.username?.toLowerCase().includes(kw)
+
+  const repliesOf = {}
+  for (const c of comments.value) {
+    if (c.parent_id) (repliesOf[c.parent_id] ??= []).push(c)
+  }
+
+  const tops = comments.value.filter((c) => !c.parent_id && match(c))
+  tops.sort((a, b) => {
+    if (!!a.pinned_at !== !!b.pinned_at) return a.pinned_at ? -1 : 1
+    if (a.pinned_at && b.pinned_at) return new Date(a.pinned_at) - new Date(b.pinned_at)
     if (sortBy.value === 'hot') {
       const diff =
         (commentLikes.value[b.id]?.count ?? 0) -
@@ -96,7 +109,13 @@ const displayedComments = computed(() => {
     }
     return new Date(a.created_at) - new Date(b.created_at)
   })
-  return [...pinned, ...rest]
+
+  return tops.map((t) => ({
+    ...t,
+    replies: (repliesOf[t.id] ?? [])
+      .filter((r) => match(r) || !kw)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
+  }))
 })
 
 function canDelete(userId) {
@@ -153,13 +172,60 @@ async function togglePin(comment) {
   ElMessage.success(pinned ? '已置顶' : '已取消置顶')
 }
 
-async function submitComment() {
-  if (!newComment.value.trim()) return
-  submitting.value = true
+function startReply(comment) {
+  replyTo.value = comment
+  replyText.value = ''
+}
+
+function cancelReply() {
+  replyTo.value = null
+  replyText.value = ''
+}
+
+async function submitReply() {
+  if (!replyText.value.trim()) return
+  replySubmitting.value = true
   const { error } = await supabase.from('comments').insert({
     problem_id: problemId,
     user_id: currentUserId.value,
+    parent_id: replyTo.value.id,
+    content: replyText.value.trim(),
+    images: [],
+  })
+  replySubmitting.value = false
+  if (error) return ElMessage.error(error.message)
+  cancelReply()
+  load()
+}
+
+function onPickImages(e) {
+  for (const file of e.target.files) {
+    pendingImages.value.push({ file, preview: URL.createObjectURL(file) })
+  }
+  e.target.value = ''
+}
+
+function removeImage(i) {
+  URL.revokeObjectURL(pendingImages.value[i].preview)
+  pendingImages.value.splice(i, 1)
+}
+
+async function submitComment() {
+  if (!newComment.value.trim() && !pendingImages.value.length) return
+  submitting.value = true
+  const uploaded = pendingImages.value.length
+    ? await uploadImages(pendingImages.value.map((i) => i.file))
+    : []
+  if (pendingImages.value.length && !uploaded.length) {
+    submitting.value = false
+    return // 图片全传失败，中止提交
+  }
+  const { error } = await supabase.from('comments').insert({
+    problem_id: problemId,
+    user_id: currentUserId.value,
+    parent_id: null,
     content: newComment.value.trim(),
+    images: uploaded,
   })
   submitting.value = false
   if (error) {
@@ -167,6 +233,7 @@ async function submitComment() {
     return
   }
   newComment.value = ''
+  pendingImages.value = []
   load()
 }
 
@@ -252,8 +319,9 @@ async function removeComment(id) {
         </div>
       </div>
 
+      <!-- 顶层评论 -->
       <div
-        v-for="c in displayedComments"
+        v-for="c in commentTree"
         :key="c.id"
         style="border-top: 1px solid var(--el-border-color-lighter); padding: 12px 0"
       >
@@ -266,13 +334,7 @@ async function removeComment(id) {
           </span>
           <span style="color: var(--el-text-color-secondary); font-size: 13px">
             {{ new Date(c.created_at).toLocaleString('zh-CN') }}
-            <el-button
-              v-if="canPin"
-              link
-              size="small"
-              style="margin-left: 8px"
-              @click="togglePin(c)"
-            >
+            <el-button v-if="canPin" link size="small" style="margin-left: 8px" @click="togglePin(c)">
               {{ c.pinned_at ? '取消置顶' : '置顶' }}
             </el-button>
             <el-button
@@ -286,35 +348,134 @@ async function removeComment(id) {
             </el-button>
           </span>
         </div>
-        <p style="white-space: pre-wrap; margin: 8px 0">{{ c.content }}</p>
-        <el-button
-          size="small"
-          text
-          :type="commentLikes[c.id]?.liked ? 'primary' : 'default'"
-          :disabled="c.user_id === currentUserId"
-          @click="toggleCommentLike(c)"
-        >
-          {{ commentLikes[c.id]?.liked ? 'Liked' : 'Like' }} {{ commentLikes[c.id]?.count ?? 0 }}
-        </el-button>
-      </div>
-      <el-empty v-if="!displayedComments.length" description="暂无讨论" :image-size="80" />
+        <p v-if="c.content" style="white-space: pre-wrap; margin: 8px 0">{{ c.content }}</p>
 
+        <!-- 评论配图：显示压缩图，可下载原图 -->
+        <div v-if="c.images?.length" style="display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0">
+          <div v-for="(img, i) in c.images" :key="i" style="text-align: center">
+            <el-image
+              :src="img.thumb"
+              :preview-src-list="[img.thumb]"
+              fit="cover"
+              preview-teleported
+              style="width: 120px; height: 120px; border-radius: 4px"
+            />
+            <div>
+              <a :href="img.original" target="_blank" download style="font-size: 12px">下载原图</a>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 4px; align-items: center">
+          <el-button
+            size="small"
+            text
+            :type="commentLikes[c.id]?.liked ? 'primary' : 'default'"
+            :disabled="c.user_id === currentUserId"
+            @click="toggleCommentLike(c)"
+          >
+            {{ commentLikes[c.id]?.liked ? 'Liked' : 'Like' }} {{ commentLikes[c.id]?.count ?? 0 }}
+          </el-button>
+          <el-button size="small" text @click="startReply(c)">回复</el-button>
+        </div>
+
+        <!-- 楼中楼回复输入框 -->
+        <div
+          v-if="replyTo?.id === c.id"
+          style="margin: 8px 0 4px; padding: 10px; background: var(--el-fill-color-light); border-radius: 6px"
+        >
+          <div style="font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 6px">
+            回复 @{{ c.profiles?.username }}
+          </div>
+          <el-input v-model="replyText" type="textarea" :rows="2" placeholder="写下你的回复…" />
+          <div style="margin-top: 6px; display: flex; gap: 8px">
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="!replyText.trim()"
+              :loading="replySubmitting"
+              @click="submitReply"
+            >
+              发表
+            </el-button>
+            <el-button size="small" @click="cancelReply">取消</el-button>
+          </div>
+        </div>
+
+        <!-- 楼中楼 -->
+        <div
+          v-for="r in c.replies"
+          :key="r.id"
+          style="margin: 8px 0 0 36px; padding: 8px 12px; background: var(--el-fill-color-light); border-radius: 6px"
+        >
+          <div style="display: flex; justify-content: space-between; font-size: 13px">
+            <strong>{{ r.profiles?.username }}</strong>
+            <span style="color: var(--el-text-color-secondary)">
+              {{ new Date(r.created_at).toLocaleString('zh-CN') }}
+              <el-button
+                v-if="canDelete(r.user_id)"
+                link
+                type="danger"
+                size="small"
+                @click="removeComment(r.id)"
+              >
+                删除
+              </el-button>
+            </span>
+          </div>
+          <p style="white-space: pre-wrap; margin: 6px 0">{{ r.content }}</p>
+          <el-button
+            size="small"
+            text
+            :type="commentLikes[r.id]?.liked ? 'primary' : 'default'"
+            :disabled="r.user_id === currentUserId"
+            @click="toggleCommentLike(r)"
+          >
+            {{ commentLikes[r.id]?.liked ? 'Liked' : 'Like' }} {{ commentLikes[r.id]?.count ?? 0 }}
+          </el-button>
+        </div>
+      </div>
+      <el-empty v-if="!commentTree.length" description="暂无讨论" :image-size="80" />
+
+      <!-- 发表新评论 -->
       <el-input
         v-model="newComment"
         type="textarea"
         :rows="3"
-        placeholder="写下你的思路或解答…"
+        placeholder="写下你的思路或解答…（可添加图片）"
         style="margin-top: 16px"
       />
-      <el-button
-        type="primary"
-        style="margin-top: 8px"
-        :disabled="!newComment.trim()"
-        :loading="submitting"
-        @click="submitComment"
-      >
-        发表回复
-      </el-button>
+      <div style="display: flex; gap: 12px; align-items: flex-start; margin-top: 8px; flex-wrap: wrap">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap">
+          <div
+            v-for="(img, i) in pendingImages"
+            :key="i"
+            style="position: relative"
+          >
+            <img :src="img.preview" style="width: 72px; height: 72px; object-fit: cover; border-radius: 4px" />
+            <el-button
+              link
+              size="small"
+              style="position: absolute; top: -6px; right: -6px; background: rgba(0,0,0,.55); color: #fff; border-radius: 50%; padding: 2px"
+              @click="removeImage(i)"
+            >
+              ×
+            </el-button>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <el-button size="small" @click="fileInput.click()">添加图片</el-button>
+          <input ref="fileInput" type="file" accept="image/*" multiple hidden @change="onPickImages" />
+          <el-button
+            type="primary"
+            :disabled="!newComment.trim() && !pendingImages.length"
+            :loading="submitting"
+            @click="submitComment"
+          >
+            发表回复
+          </el-button>
+        </div>
+      </div>
     </el-card>
   </div>
   <el-empty v-else description="题目不存在或已删除" />

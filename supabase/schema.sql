@@ -47,7 +47,9 @@ create table comments (
   id bigint generated always as identity primary key,
   problem_id bigint not null references problems(id) on delete cascade,
   user_id uuid not null references profiles(id) on delete cascade,
+  parent_id bigint references comments(id) on delete cascade,  -- 楼中楼：回复的评论
   content text not null,
+  images jsonb not null default '[]',  -- 评论配图：[{thumb, original}]，页面显示压缩图 thumb
   pinned_at timestamptz,               -- 置顶时间：楼主/管理员可设置，置顶按此时间排序
   created_at timestamptz not null default now()
 );
