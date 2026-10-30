@@ -1,3 +1,21 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/rest/v1/:path*",
+      "destination": "https://bvpwfeejasowqievwnfo.supabase.co/rest/v1/:path*"
+    },
+    {
+      "source": "/auth/v1/:path*",
+      "destination": "https://bvpwfeejasowqievwnfo.supabase.co/auth/v1/:path*"
+    },
+    {
+      "source": "/storage/v1/:path*",
+      "destination": "https://bvpwfeejasowqievwnfo.supabase.co/storage/v1/:path*"
+    },
+    {
+      "source": "/realtime/v1/:path*",
+      "destination": "https://bvpwfeejasowqievwnfo.supabase.co/realtime/v1/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
