@@ -95,6 +95,13 @@ select p.id, p.username,
 from profiles p
 order by score desc;
 
+-- 6. 每日访问记录：联合主键保证每人每天只记一条，按天统计去重访客数
+create table daily_visits (
+  user_id uuid not null references profiles(id) on delete cascade,
+  visited_on date not null default current_date,
+  primary key (user_id, visited_on)
+);
+
 -- ============================================================
 -- 权限（RLS）：先启用，再建策略
 -- ============================================================
@@ -122,6 +129,11 @@ create policy "tags read"      on tags for select to authenticated using (true);
 create policy "tags admin add" on tags for insert to authenticated with check (
   exists (select 1 from profiles where id = auth.uid() and role = 'admin')
 );
+
+-- daily_visits：人人可读（用于显示今日访客数），只能记自己的到访
+alter table daily_visits enable row level security;
+create policy "visits read"      on daily_visits for select to authenticated using (true);
+create policy "visits insert own" on daily_visits for insert to authenticated with check (auth.uid() = user_id);
 
 -- comments：人人可读；本人可发；本人/题目楼主/管理员可改（用于置顶）；本人或管理员可删
 create policy "comments read"   on comments for select to authenticated using (true);
