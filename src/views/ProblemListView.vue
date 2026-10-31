@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase'
 
@@ -7,27 +7,55 @@ const router = useRouter()
 const problems = ref([])
 const loading = ref(true)
 
-onMounted(async () => {
-  const { data } = await supabase
+// 筛选与排序
+const tags = ref([])
+const tagFilter = ref(null) // 选中分类的 id
+const sortBy = ref('time') // time 最新发布 | difficulty 难度高→低
+
+async function load() {
+  loading.value = true
+  let query = supabase
     .from('problems')
-    .select('id, title, created_at, profiles!problems_user_id_fkey(username), problem_likes(count), tags(name), difficulty')
-    .order('created_at', { ascending: false })
+    .select('id, title, created_at, difficulty, profiles!problems_user_id_fkey(username), problem_likes(count), tags(name)')
+  if (tagFilter.value) query = query.eq('tag_id', tagFilter.value)
+  query =
+    sortBy.value === 'time'
+      ? query.order('created_at', { ascending: false })
+      : // 难度排序：星多的在前，未设置难度的排在最后
+        query.order('difficulty', { ascending: false, nullsFirst: false })
+  const { data } = await query
   problems.value = data ?? []
   loading.value = false
+}
+
+onMounted(async () => {
+  const { data: tagData } = await supabase.from('tags').select('id, name').order('name')
+  tags.value = tagData ?? []
+  load()
 })
+
+watch([tagFilter, sortBy], load)
 </script>
 
 <template>
-  <el-card>
-    <div style="display: flex; justify-content: space-between; align-items: center">
+  <el-card v-loading="loading">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px">
       <h2 style="margin: 0">题目</h2>
-      <el-button type="primary" @click="router.push({ name: 'problem-new' })">
-        发布题目
-      </el-button>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <el-select v-model="tagFilter" placeholder="全部分类" clearable style="width: 150px">
+          <el-option v-for="t in tags" :key="t.id" :label="t.name" :value="t.id" />
+        </el-select>
+        <el-radio-group v-model="sortBy" size="default">
+          <el-radio-button value="time">时间</el-radio-button>
+          <el-radio-button value="difficulty">难度</el-radio-button>
+        </el-radio-group>
+        <el-button type="primary" @click="router.push({ name: 'problem-new' })">
+          发布题目
+        </el-button>
+      </div>
     </div>
     <el-table
       :data="problems"
-      v-loading="loading"
       style="margin-top: 16px; cursor: pointer"
       @row-click="(row) => router.push({ name: 'problem-detail', params: { id: row.id } })"
     >
@@ -55,7 +83,7 @@ onMounted(async () => {
           {{ new Date(row.created_at).toLocaleString('zh-CN') }}
         </template>
       </el-table-column>
-      <template #empty>还没有题目，点击右上角发布第一道题吧</template>
+      <template #empty>没有符合条件的题目</template>
     </el-table>
   </el-card>
 </template>
