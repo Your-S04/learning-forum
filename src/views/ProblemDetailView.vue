@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MdPreview } from 'md-editor-v3'
@@ -7,6 +7,7 @@ import 'md-editor-v3/lib/style.css'
 import { supabase } from '../lib/supabase'
 import { uploadImages } from '../lib/image'
 import { authState } from '../composables/useAuth'
+import EmojiPicker from '../components/EmojiPicker.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +34,27 @@ const replySubmitting = ref(false)
 // 评论配图：本地待上传列表
 const pendingImages = ref([]) // [{ file, preview }]
 const fileInput = ref(null)
+
+// 两个文本域的引用，用于 emoji 插入到光标处
+const commentInput = ref(null)
+const replyInput = ref(null)
+
+// 在 textarea 的光标位置插入文本（没有光标信息时追加到末尾）
+async function insertEmoji(inputRef, emoji, get, set) {
+  const el = inputRef.value?.$el?.querySelector('textarea')
+  if (!el) {
+    set(get() + emoji)
+    return
+  }
+  const text = get()
+  const start = el.selectionStart ?? text.length
+  const end = el.selectionEnd ?? start
+  set(text.slice(0, start) + emoji + text.slice(end))
+  await nextTick()
+  el.focus()
+  const pos = start + emoji.length
+  el.setSelectionRange(pos, pos)
+}
 
 const isAdmin = computed(() => authState.profile?.role === 'admin')
 const currentUserId = computed(() => authState.session?.user.id)
@@ -387,8 +409,8 @@ async function removeComment(id) {
           <div style="font-size: 13px; color: var(--el-text-color-secondary); margin-bottom: 6px">
             回复 @{{ c.profiles?.username }}
           </div>
-          <el-input v-model="replyText" type="textarea" :rows="2" placeholder="写下你的回复…" />
-          <div style="margin-top: 6px; display: flex; gap: 8px">
+          <el-input ref="replyInput" v-model="replyText" type="textarea" :rows="2" placeholder="写下你的回复…" />
+          <div style="margin-top: 6px; display: flex; gap: 8px; align-items: center">
             <el-button
               size="small"
               type="primary"
@@ -399,6 +421,7 @@ async function removeComment(id) {
               发表
             </el-button>
             <el-button size="small" @click="cancelReply">取消</el-button>
+            <EmojiPicker @select="(e) => insertEmoji(replyInput, e, () => replyText, (v) => (replyText = v))" />
           </div>
         </div>
 
@@ -439,6 +462,7 @@ async function removeComment(id) {
 
       <!-- 发表新评论 -->
       <el-input
+        ref="commentInput"
         v-model="newComment"
         type="textarea"
         :rows="3"
@@ -463,9 +487,10 @@ async function removeComment(id) {
             </el-button>
           </div>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
           <el-button size="small" @click="fileInput.click()">添加图片</el-button>
           <input ref="fileInput" type="file" accept="image/*" multiple hidden @change="onPickImages" />
+          <EmojiPicker @select="(e) => insertEmoji(commentInput, e, () => newComment, (v) => (newComment = v))" />
           <el-button
             type="primary"
             :disabled="!newComment.trim() && !pendingImages.length"
