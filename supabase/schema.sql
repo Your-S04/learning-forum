@@ -193,7 +193,68 @@ returns text as $$
   select value from app_config where key = k;
 $$ language sql security definer stable;
 
--- 通知 1：别人顶层评论你的题目 → 微信推送题目作者
+-- 8. 站内通知：由提醒触发器写入（security definer，用户无法伪造别人的通知）
+-- 不建 insert 策略 = 普通用户只能读/标记自己的通知，不能新增
+create table notifications (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references profiles(id) on delete cascade,  -- 接收人
+  type text not null,                  -- reply / reply_nested / comment_like / problem_like
+  title text not null,
+  link_problem_id bigint,              -- 点击跳转的题目
+  is_read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table notifications enable row level security;
+create policy "notifications read own"   on notifications for select to authenticated using (auth.uid() = user_id);
+create policy "notifications update own" on notifications for update to authenticated using (auth.uid() = user_id);
+
+-- 写通知的统一入口（触发器内部调用）
+create or replace function public.add_notification(p_user uuid, p_type text, p_title text, p_problem bigint)
+returns void as $$
+begin
+  insert into notifications (user_id, type, title, link_problem_id)
+  values (p_user, p_type, p_title, p_problem);
+end;
+$$ language plpgsql security definer;
+
+-- 9. 每日签到：联合主键保证每人每天一条，check 约束防止补签历史日期
+create table checkins (
+  user_id uuid not null references profiles(id) on delete cascade,
+  checkin_date date not null default current_date check (checkin_date = current_date),
+  primary key (user_id, checkin_date)
+);
+alter table checkins enable row level security;
+create policy "checkins read"   on checkins for select to authenticated using (true);
+create policy "checkins insert" on checkins for insert to authenticated with check (auth.uid() = user_id);
+
+-- 签到榜视图：连续天数（日期-序号分组法）、累计天数
+create or replace view checkin_board as
+with days as (
+  select user_id, checkin_date,
+    row_number() over (partition by user_id order by checkin_date) as rn
+  from checkins
+),
+runs as (
+  select user_id,
+    checkin_date - (row_number() over (partition by user_id order by checkin_date))::int as grp,
+    checkin_date
+  from days
+),
+streaks as (
+  select user_id, grp, count(*) as len, max(checkin_date) as last_day
+  from runs group by user_id, grp
+),
+current_streak as (
+  select user_id, len from streaks
+  where last_day >= current_date - 1  -- 今天或昨天打过，连续才算延续
+)
+select p.id, p.username, p.student_no,
+  coalesce(cs.len, 0) as streak,
+  (select count(*) from checkins c where c.user_id = p.id) as total
+from profiles p
+left join current_streak cs on cs.user_id = p.id;
+
+-- 通知 1：别人顶层评论你的题目 → 站内通知 + 微信推送题目作者
 -- 楼中楼回复（parent_id 非空）不在这里处理，由下面的 notify_comment_replied 推给被回复者
 create or replace function public.notify_problem_author()
 returns trigger as $$
@@ -202,14 +263,17 @@ declare
   v_author uuid;
   v_uid text;
   v_actor text;
+  v_title text;
 begin
-  if coalesce(v_app_token, '') = '' then return new; end if;
   if new.parent_id is not null then return new; end if;
   select user_id into v_author from problems where id = new.problem_id;
   if v_author is null or v_author = new.user_id then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  v_title := coalesce(v_actor, '有人') || ' 回复了你的题目：' || left(new.content, 60);
+  perform public.add_notification(v_author, 'reply', v_title, new.problem_id);
+  if coalesce(v_app_token, '') = '' then return new; end if;
   select pusher_uid into v_uid from push_tokens where user_id = v_author;
   if v_uid is null or v_uid = '' then return new; end if;
-  select username into v_actor from profiles where id = new.user_id;
   perform net.http_post(
     url := 'https://wxpusher.zjiecode.com/api/send/message',
     headers := '{"Content-Type":"application/json"}'::jsonb,
@@ -229,7 +293,7 @@ drop trigger if exists notify_comment on comments;
 create trigger notify_comment after insert on comments
   for each row execute function public.notify_problem_author();
 
--- 通知 1.1：楼中楼回复了你的评论 → 微信推送被回复的评论作者
+-- 通知 1.1：楼中楼回复了你的评论 → 站内通知 + 微信推送被回复的评论作者
 create or replace function public.notify_comment_replied()
 returns trigger as $$
 declare
@@ -237,14 +301,17 @@ declare
   v_parent_author uuid;
   v_uid text;
   v_actor text;
+  v_title text;
 begin
-  if coalesce(v_app_token, '') = '' then return new; end if;
   if new.parent_id is null then return new; end if;
   select user_id into v_parent_author from comments where id = new.parent_id;
   if v_parent_author is null or v_parent_author = new.user_id then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  v_title := coalesce(v_actor, '有人') || ' 回复了你的评论：' || left(new.content, 60);
+  perform public.add_notification(v_parent_author, 'reply_nested', v_title, new.problem_id);
+  if coalesce(v_app_token, '') = '' then return new; end if;
   select pusher_uid into v_uid from push_tokens where user_id = v_parent_author;
   if v_uid is null or v_uid = '' then return new; end if;
-  select username into v_actor from profiles where id = new.user_id;
   perform net.http_post(
     url := 'https://wxpusher.zjiecode.com/api/send/message',
     headers := '{"Content-Type":"application/json"}'::jsonb,
@@ -264,7 +331,7 @@ drop trigger if exists notify_comment_reply on comments;
 create trigger notify_comment_reply after insert on comments
   for each row execute function public.notify_comment_replied();
 
--- 通知 1.2：你的评论被点赞 → 微信推送评论作者
+-- 通知 1.2：你的评论被点赞 → 站内通知 + 微信推送评论作者
 create or replace function public.notify_comment_liked()
 returns trigger as $$
 declare
@@ -273,14 +340,21 @@ declare
   v_content text;
   v_uid text;
   v_actor text;
+  v_title text;
 begin
-  if coalesce(v_app_token, '') = '' then return new; end if;
   select user_id, content into v_comment_author, v_content
     from comments where id = new.comment_id;
   if v_comment_author is null or v_comment_author = new.user_id then return new; end if;
+  select problem_id into v_title from comments where id = new.comment_id;
+  select username into v_actor from profiles where id = new.user_id;
+  perform public.add_notification(
+    v_comment_author, 'comment_like',
+    coalesce(v_actor, '有人') || ' 赞了你的回复：' || left(v_content, 60),
+    v_title
+  );
+  if coalesce(v_app_token, '') = '' then return new; end if;
   select pusher_uid into v_uid from push_tokens where user_id = v_comment_author;
   if v_uid is null or v_uid = '' then return new; end if;
-  select username into v_actor from profiles where id = new.user_id;
   perform net.http_post(
     url := 'https://wxpusher.zjiecode.com/api/send/message',
     headers := '{"Content-Type":"application/json"}'::jsonb,
@@ -299,6 +373,47 @@ $$ language plpgsql security definer;
 drop trigger if exists notify_comment_like on comment_likes;
 create trigger notify_comment_like after insert on comment_likes
   for each row execute function public.notify_comment_liked();
+
+-- 通知 2：别人点赞你的题目 → 站内通知 + 微信推送题目作者
+create or replace function public.notify_problem_liked()
+returns trigger as $$
+declare
+  v_app_token text := public.get_app_config('wxpusher_app_token');
+  v_author uuid;
+  v_title text;
+  v_uid text;
+  v_actor text;
+  v_problem_title text;
+begin
+  select user_id, title into v_author, v_problem_title from problems where id = new.problem_id;
+  if v_author is null or v_author = new.user_id then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  perform public.add_notification(
+    v_author, 'problem_like',
+    coalesce(v_actor, '有人') || ' 赞了你的题目「' || v_problem_title || '」',
+    new.problem_id
+  );
+  if coalesce(v_app_token, '') = '' then return new; end if;
+  select pusher_uid into v_uid from push_tokens where user_id = v_author;
+  if v_uid is null or v_uid = '' then return new; end if;
+  perform net.http_post(
+    url := 'https://wxpusher.zjiecode.com/api/send/message',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object(
+      'appToken', v_app_token,
+      'uids', jsonb_build_array(v_uid),
+      'summary', '【学习论坛】' || coalesce(v_actor, '有人') || ' 赞了你的题目',
+      'content', coalesce(v_actor, '有人') || ' 赞了你的题目「' || v_problem_title || '」',
+      'contentType', 1
+    )
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists notify_problem_like on problem_likes;
+create trigger notify_problem_like after insert on problem_likes
+  for each row execute function public.notify_problem_liked();
 
 -- 通知 2：别人点赞你的题目 → 微信推送题目作者
 create or replace function public.notify_problem_liked()
