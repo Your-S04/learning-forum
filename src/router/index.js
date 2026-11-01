@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/problems/:id(\\d+)/edit', name: 'problem-edit', component: () => import('../views/ProblemEditView.vue') },
     { path: '/board', name: 'board', component: () => import('../views/BoardView.vue') },
     { path: '/leaderboard', name: 'leaderboard', component: () => import('../views/LeaderboardView.vue') },
+    { path: '/dashboard', name: 'dashboard', component: () => import('../views/AdminDashboardView.vue') },
     { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue') },
   ],
 })
@@ -23,6 +24,15 @@ router.beforeEach(async (to) => {
   } = await supabase.auth.getSession()
   if (!session && to.name !== 'login') return { name: 'login' }
   if (session && to.name === 'login') return { name: 'problems' }
+  // 管理面板仅管理员可访问
+  if (to.name === 'dashboard') {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .single()
+    if (profile?.role !== 'admin') return { name: 'problems' }
+  }
 })
 
 export default router

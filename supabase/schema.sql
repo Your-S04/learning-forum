@@ -6,20 +6,36 @@
 -- 1. 用户资料表（与 Supabase Auth 的用户一一对应）
 create table profiles (
   id uuid primary key references auth.users on delete cascade,
-  username text not null,
+  username text not null,              -- 显示名，可在个人中心修改
+  student_no text,                     -- 学号：登录凭证（邮箱前缀），建档时自动写入
   role text not null default 'student' check (role in ('admin', 'student')),
   created_at timestamptz not null default now()
 );
 
--- 新账号创建时自动建档（用户名取邮箱 @ 前面的部分）
+-- 新账号创建时自动建档（用户名与学号默认都取邮箱 @ 前面的部分）
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, username)
-  values (new.id, split_part(new.email, '@', 1));
+  insert into public.profiles (id, username, student_no)
+  values (new.id, split_part(new.email, '@', 1), split_part(new.email, '@', 1));
   return new;
 end;
 $$ language plpgsql security definer;
+
+-- 只有管理员能修改 role 字段（防止用户通过 API 自助提权）
+create or replace function public.protect_role_change()
+returns trigger as $$
+begin
+  if new.role is distinct from old.role
+     and not exists (select 1 from profiles where id = auth.uid() and role = 'admin') then
+    raise exception '只有管理员可以修改角色';
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger profiles_protect_role
+  before update on profiles for each row execute function public.protect_role_change();
 
 create trigger on_auth_user_created
   after insert on auth.users
@@ -110,9 +126,12 @@ alter table problems    enable row level security;
 alter table comments    enable row level security;
 alter table board_items enable row level security;
 
--- profiles：登录后人人可读，用户名只允许自己改
+-- profiles：登录后人人可读；本人可改资料，管理员可改任何人（角色变更受触发器保护）
 create policy "profiles read"   on profiles for select to authenticated using (true);
-create policy "profiles update" on profiles for update to authenticated using (auth.uid() = id);
+create policy "profiles update" on profiles for update to authenticated using (
+  auth.uid() = id
+  or exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+);
 
 -- problems：人人可读；本人可增改；本人或管理员可删
 create policy "problems read"   on problems for select to authenticated using (true);

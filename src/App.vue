@@ -7,6 +7,7 @@ import { supabase } from './lib/supabase'
 const route = useRoute()
 const router = useRouter()
 const username = computed(() => authState.profile?.username ?? '')
+const isAdmin = computed(() => authState.profile?.role === 'admin')
 
 // 今日访客：记录"我今天来过"（同一人当天只记一次），再统计今天的去重人数
 const todayVisitors = ref(0)
@@ -50,6 +51,7 @@ async function handleSignOut() {
         <el-menu-item index="/problems">题目</el-menu-item>
         <el-menu-item index="/board">看板</el-menu-item>
         <el-menu-item index="/leaderboard">排行榜</el-menu-item>
+        <el-menu-item v-if="isAdmin" index="/dashboard">管理面板</el-menu-item>
       </el-menu>
       <div style="display: flex; align-items: center; gap: 16px">
         <span style="color: var(--el-text-color-secondary); font-size: 13px">
