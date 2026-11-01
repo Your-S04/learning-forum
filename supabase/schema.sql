@@ -170,7 +170,8 @@ create policy "favorites insert own" on favorites for insert to authenticated wi
 create policy "favorites delete own" on favorites for delete to authenticated using (auth.uid() = user_id);
 
 -- 7. WxPusher 微信推送：每人存自己的 UID（不注册账号、无实名、免费）
--- appToken 不入库（放在触发器函数体里，见部署时的迁移 SQL），UID 严格只有本人可读写
+-- appToken 存在下面的私有配置表 app_config（无 RLS 策略，任何 API 用户都读不到），
+-- UID 严格只有本人可读写
 create table push_tokens (
   user_id uuid primary key references profiles(id) on delete cascade,
   pusher_uid text not null,            -- UID_ 开头，同学从 WxPusher 公众号复制
@@ -180,17 +181,28 @@ alter table push_tokens enable row level security;
 create policy "push tokens own" on push_tokens for all to authenticated
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
--- 通知：别人评论你的题目时，给你推微信（自己评论自己不推，没填 UID 不推）
--- 注意：本文件里 appToken 是占位符，部署时用迁移 SQL 覆盖为真实值
+-- 私有配置表：不建任何 RLS 策略 = 所有 API 用户都无法访问，只有 security definer 函数可用
+create table app_config (
+  key text primary key,
+  value text not null
+);
+alter table app_config enable row level security;
+
+create or replace function public.get_app_config(k text)
+returns text as $$
+  select value from app_config where key = k;
+$$ language sql security definer stable;
+
+-- 通知 1：别人评论你的题目 → 微信推送题目作者
 create or replace function public.notify_problem_author()
 returns trigger as $$
 declare
-  v_app_token text := 'AT_你的appToken';
+  v_app_token text := public.get_app_config('wxpusher_app_token');
   v_author uuid;
   v_uid text;
   v_actor text;
 begin
-  if v_app_token = 'AT_你的appToken' then return new; end if;
+  if coalesce(v_app_token, '') = '' then return new; end if;
   select user_id into v_author from problems where id = new.problem_id;
   if v_author is null or v_author = new.user_id then return new; end if;
   select pusher_uid into v_uid from push_tokens where user_id = v_author;
@@ -214,6 +226,87 @@ $$ language plpgsql security definer;
 drop trigger if exists notify_comment on comments;
 create trigger notify_comment after insert on comments
   for each row execute function public.notify_problem_author();
+
+-- 通知 2：别人点赞你的题目 → 微信推送题目作者
+create or replace function public.notify_problem_liked()
+returns trigger as $$
+declare
+  v_app_token text := public.get_app_config('wxpusher_app_token');
+  v_author uuid;
+  v_title text;
+  v_uid text;
+  v_actor text;
+begin
+  if coalesce(v_app_token, '') = '' then return new; end if;
+  select user_id, title into v_author, v_title from problems where id = new.problem_id;
+  if v_author is null or v_author = new.user_id then return new; end if;
+  select pusher_uid into v_uid from push_tokens where user_id = v_author;
+  if v_uid is null or v_uid = '' then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  perform net.http_post(
+    url := 'https://wxpusher.zjiecode.com/api/send/message',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object(
+      'appToken', v_app_token,
+      'uids', jsonb_build_array(v_uid),
+      'summary', '【学习论坛】' || coalesce(v_actor, '有人') || ' 赞了你的题目',
+      'content', coalesce(v_actor, '有人') || ' 赞了你的题目「' || v_title || '」',
+      'contentType', 1
+    )
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists notify_problem_like on problem_likes;
+create trigger notify_problem_like after insert on problem_likes
+  for each row execute function public.notify_problem_liked();
+
+-- 通知 3：作业/考试截止前 1 小时 → 微信推送给所有开启了推送的用户
+-- 由 pg_cron 定时任务每 10 分钟跑一次；remind_sent 标记保证每条只提醒一次
+alter table board_items add column remind_sent boolean not null default false;
+
+create or replace function public.notify_due_soon()
+returns void as $$
+declare
+  v_app_token text := public.get_app_config('wxpusher_app_token');
+  v_item record;
+  v_uid record;
+begin
+  if coalesce(v_app_token, '') = '' then return; end if;
+  for v_item in
+    select * from board_items
+    where type in ('homework', 'exam')
+      and end_at is not null
+      and remind_sent = false
+      and end_at > now()
+      and end_at <= now() + interval '1 hour'
+  loop
+    for v_uid in select pusher_uid from push_tokens
+    loop
+      perform net.http_post(
+        url := 'https://wxpusher.zjiecode.com/api/send/message',
+        headers := '{"Content-Type":"application/json"}'::jsonb,
+        body := jsonb_build_object(
+          'appToken', v_app_token,
+          'uids', jsonb_build_array(v_uid.pusher_uid),
+          'summary', '【学习论坛】' || (case v_item.type when 'exam' then '考试' else '作业' end) || '即将截止',
+          'content', v_item.title
+            || (case when v_item.course is not null then '（' || v_item.course || '）' else '' end)
+            || ' 将于 ' || to_char(v_item.end_at, 'MM月DD日 HH24:MI') || ' 截止，抓紧完成！',
+          'contentType', 1
+        )
+      );
+    end loop;
+    update board_items set remind_sent = true where id = v_item.id;
+  end loop;
+end;
+$$ language plpgsql security definer;
+
+-- 每 10 分钟检查一次即将截止的任务
+select cron.schedule('due-soon-notify', '*/10 * * * *', $cron$
+  select public.notify_due_soon()
+$cron$);
 
 -- comments：人人可读；本人可发；本人/题目楼主/管理员可改（用于置顶）；本人或管理员可删
 create policy "comments read"   on comments for select to authenticated using (true);
