@@ -99,7 +99,7 @@ create table comment_likes (
 );
 
 -- 5. 排行榜视图：发题 3 + 回复 1 + 获赞 2 + 被置顶 2（改规则只改这里）
--- 管理员是运营者，不参与排名
+-- 仅排除运营者账号 admin@youforum.local（其学号为 admin），其他管理员正常参与
 create or replace view leaderboard as
 select p.id, p.username,
   (select count(*) from problems where user_id = p.id) * 3 +
@@ -111,7 +111,7 @@ select p.id, p.username,
   (select count(*) from comments where user_id = p.id and pinned_at is not null) * 2
   as score
 from profiles p
-where p.role <> 'admin'
+where p.student_no <> 'admin'
 order by score desc;
 
 -- 5.1 我的收藏：每人每题一条
@@ -229,7 +229,8 @@ alter table checkins enable row level security;
 create policy "checkins read"   on checkins for select to authenticated using (true);
 create policy "checkins insert" on checkins for insert to authenticated with check (auth.uid() = user_id);
 
--- 签到榜视图：连续天数（日期-序号分组法）、累计天数；管理员不参与排名
+-- 签到榜视图：连续天数（日期-序号分组法）、累计天数
+-- 仅排除运营者账号 admin@youforum.local（其学号为 admin），其他管理员正常参与
 create or replace view checkin_board as
 with days as (
   select user_id, checkin_date,
@@ -255,7 +256,7 @@ select p.id, p.username, p.student_no,
   (select count(*) from checkins c where c.user_id = p.id) as total
 from profiles p
 left join current_streak cs on cs.user_id = p.id
-where p.role <> 'admin';
+where p.student_no <> 'admin';
 
 -- 通知 1：别人顶层评论你的题目 → 站内通知 + 微信推送题目作者
 -- 楼中楼回复（parent_id 非空）不在这里处理，由下面的 notify_comment_replied 推给被回复者
