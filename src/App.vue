@@ -2,10 +2,13 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authState, signOut } from './composables/useAuth'
+import { useTheme } from './composables/useTheme'
 import { supabase } from './lib/supabase'
+import NoticeBanner from './components/NoticeBanner.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { isDark, toggleTheme } = useTheme()
 const username = computed(() => authState.profile?.username ?? '')
 const isAdmin = computed(() => authState.profile?.role === 'admin')
 
@@ -54,9 +57,12 @@ async function handleSignOut() {
         <el-menu-item v-if="isAdmin" index="/dashboard">管理面板</el-menu-item>
       </el-menu>
       <div style="display: flex; align-items: center; gap: 16px">
-        <span style="color: var(--el-text-color-secondary); font-size: 13px">
+        <span class="hide-sm" style="color: var(--el-text-color-secondary); font-size: 13px">
           今日访问 {{ todayVisitors }} 人
         </span>
+        <el-button link @click="toggleTheme">
+          <el-icon><Moon v-if="!isDark" /><Sunny v-else /></el-icon>
+        </el-button>
         <el-dropdown>
           <span style="cursor: pointer">
             <el-icon style="vertical-align: -2px"><User /></el-icon>
@@ -72,6 +78,7 @@ async function handleSignOut() {
       </div>
     </el-header>
     <el-main>
+      <NoticeBanner />
       <router-view />
     </el-main>
   </el-container>

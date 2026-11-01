@@ -75,10 +75,10 @@ watch([tagFilter, sortBy], load)
       <el-table-column label="Like" width="80" align="center">
         <template #default="{ row }">{{ row.problem_likes?.[0]?.count ?? 0 }}</template>
       </el-table-column>
-      <el-table-column label="作者" width="140">
+      <el-table-column label="作者" width="140" class-name="hide-sm" label-class-name="hide-sm">
         <template #default="{ row }">{{ row.profiles?.username }}</template>
       </el-table-column>
-      <el-table-column label="发布时间" width="200">
+      <el-table-column label="发布时间" width="200" class-name="hide-sm" label-class-name="hide-sm">
         <template #default="{ row }">
           {{ new Date(row.created_at).toLocaleString('zh-CN') }}
         </template>

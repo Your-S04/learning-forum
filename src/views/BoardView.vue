@@ -8,6 +8,7 @@ const TYPE_MAP = {
   homework: { label: '作业', tagType: 'primary' },
   exam: { label: '考试', tagType: 'danger' },
   course: { label: '课程', tagType: 'success' },
+  notice: { label: '公告', tagType: 'warning' },
 }
 
 const items = ref([])
@@ -84,6 +85,7 @@ async function remove(id) {
       <el-tab-pane :label="TYPE_MAP.homework.label" name="homework" />
       <el-tab-pane :label="TYPE_MAP.exam.label" name="exam" />
       <el-tab-pane :label="TYPE_MAP.course.label" name="course" />
+      <el-tab-pane :label="TYPE_MAP.notice.label" name="notice" />
     </el-tabs>
 
     <el-timeline style="padding-left: 4px">
@@ -126,6 +128,7 @@ async function remove(id) {
             <el-radio-button value="homework">作业</el-radio-button>
             <el-radio-button value="exam">考试</el-radio-button>
             <el-radio-button value="course">课程</el-radio-button>
+            <el-radio-button value="notice">公告</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="标题">

@@ -1,0 +1,31 @@
+/* 全局补充样式：移动端适配 */
+
+@media (max-width: 768px) {
+  /* 顶栏收窄，菜单可横向滑动 */
+  .el-header {
+    padding: 0 10px !important;
+  }
+  .el-header .el-menu--horizontal {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .el-header .el-menu--horizontal::-webkit-scrollbar {
+    display: none;
+  }
+  .el-main {
+    padding: 12px !important;
+  }
+  /* 标记了 hide-sm 的表格列/元素在小屏隐藏 */
+  .hide-sm {
+    display: none !important;
+  }
+  /* 楼中楼缩进减小 */
+  .reply-block {
+    margin-left: 16px !important;
+  }
+}
+
+/* 公告横幅 */
+.notice-banner {
+  margin-bottom: 12px;
+}

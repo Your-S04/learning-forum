@@ -70,10 +70,10 @@ create table comments (
   created_at timestamptz not null default now()
 );
 
--- 4. 看板：作业 / 考试 / 课程时间共用一张表，type 字段区分
+-- 4. 看板：作业/考试/课程/公告共用一张表，type 字段区分
 create table board_items (
   id bigint generated always as identity primary key,
-  type text not null check (type in ('homework', 'exam', 'course')),
+  type text not null check (type in ('homework', 'exam', 'course', 'notice')),
   title text not null,
   course text,
   note text,
@@ -98,7 +98,7 @@ create table comment_likes (
   primary key (comment_id, user_id)
 );
 
--- 5. 排行榜视图：发题 3 分 + 回复 1 分 + 获赞 2 分（改规则只改这里）
+-- 5. 排行榜视图：发题 3 + 回复 1 + 获赞 2 + 被置顶 2（改规则只改这里）
 create or replace view leaderboard as
 select p.id, p.username,
   (select count(*) from problems where user_id = p.id) * 3 +
@@ -106,10 +106,19 @@ select p.id, p.username,
   (select count(*) from problem_likes pl join problems pr on pr.id = pl.problem_id
      where pr.user_id = p.id) * 2 +
   (select count(*) from comment_likes cl join comments c on c.id = cl.comment_id
-     where c.user_id = p.id) * 2
+     where c.user_id = p.id) * 2 +
+  (select count(*) from comments where user_id = p.id and pinned_at is not null) * 2
   as score
 from profiles p
 order by score desc;
+
+-- 5.1 我的收藏：每人每题一条
+create table favorites (
+  problem_id bigint not null references problems(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (problem_id, user_id)
+);
 
 -- 6. 每日访问记录：联合主键保证每人每天只记一条，按天统计去重访客数
 create table daily_visits (
@@ -153,6 +162,12 @@ create policy "tags admin add" on tags for insert to authenticated with check (
 alter table daily_visits enable row level security;
 create policy "visits read"      on daily_visits for select to authenticated using (true);
 create policy "visits insert own" on daily_visits for insert to authenticated with check (auth.uid() = user_id);
+
+-- favorites：只能看和操作自己的收藏
+alter table favorites enable row level security;
+create policy "favorites read own"   on favorites for select to authenticated using (auth.uid() = user_id);
+create policy "favorites insert own" on favorites for insert to authenticated with check (auth.uid() = user_id);
+create policy "favorites delete own" on favorites for delete to authenticated using (auth.uid() = user_id);
 
 -- comments：人人可读；本人可发；本人/题目楼主/管理员可改（用于置顶）；本人或管理员可删
 create policy "comments read"   on comments for select to authenticated using (true);

@@ -7,6 +7,9 @@ import 'md-editor-v3/lib/style.css'
 import { supabase } from '../lib/supabase'
 import { uploadProblemImage } from '../lib/image'
 import { authState } from '../composables/useAuth'
+import { useTheme } from '../composables/useTheme'
+
+const { isDark } = useTheme()
 
 const route = useRoute()
 const router = useRouter()
@@ -123,6 +126,7 @@ async function submit() {
     </div>
     <MdEditor
       v-model="content"
+      :theme="isDark ? 'dark' : 'light'"
       :style="{ height: '400px' }"
       :placeholder="'描述你的题目，支持 Markdown、代码块，可粘贴/上传图片'"
       @onUploadImg="onUploadImg"

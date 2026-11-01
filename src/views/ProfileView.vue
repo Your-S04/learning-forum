@@ -1,8 +1,35 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authState, changePassword } from '../composables/useAuth'
 import { supabase } from '../lib/supabase'
+
+const router = useRouter()
+
+// 我的收藏列表
+const favorites = ref([])
+
+async function loadFavorites() {
+  const { data } = await supabase
+    .from('favorites')
+    .select('problem_id, created_at, problems(title, created_at)')
+    .eq('user_id', authState.session.user.id)
+    .order('created_at', { ascending: false })
+  favorites.value = data ?? []
+}
+
+onMounted(loadFavorites)
+
+async function removeFavorite(item) {
+  const { error } = await supabase
+    .from('favorites')
+    .delete()
+    .eq('problem_id', item.problem_id)
+    .eq('user_id', authState.session.user.id)
+  if (error) return ElMessage.error(error.message)
+  loadFavorites()
+}
 
 // 更改显示名（登录凭证仍是学号邮箱，不受影响）
 const newUsername = ref(authState.profile?.username ?? '')
@@ -50,7 +77,7 @@ async function submit() {
 </script>
 
 <template>
-  <el-card style="max-width: 480px">
+  <el-card style="max-width: 560px">
     <h2 style="margin-top: 0">个人中心</h2>
     <p style="color: var(--el-text-color-secondary); font-size: 13px">
       登录账号：{{ authState.session?.user.email }}（学号，不可更改）
@@ -69,6 +96,22 @@ async function submit() {
       <el-button type="primary" :disabled="!newUsername.trim()" :loading="savingName" @click="saveUsername">
         保存
       </el-button>
+    </div>
+
+    <el-divider />
+    <h3>我的收藏（{{ favorites.length }}）</h3>
+    <div
+      v-for="f in favorites"
+      :key="f.problem_id"
+      style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--el-border-color-lighter)"
+    >
+      <el-button link type="primary" style="max-width: 75%" @click="router.push({ name: 'problem-detail', params: { id: f.problem_id } })">
+        {{ f.problems?.title ?? '（题目已删除）' }}
+      </el-button>
+      <el-button link type="danger" size="small" @click="removeFavorite(f)">取消收藏</el-button>
+    </div>
+    <div v-if="!favorites.length" style="color: var(--el-text-color-secondary); font-size: 13px">
+      还没有收藏，在题目详情页点"☆ 收藏"即可保存
     </div>
 
     <el-divider />

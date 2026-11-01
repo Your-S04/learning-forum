@@ -7,7 +7,10 @@ import 'md-editor-v3/lib/style.css'
 import { supabase } from '../lib/supabase'
 import { uploadImages } from '../lib/image'
 import { authState } from '../composables/useAuth'
+import { useTheme } from '../composables/useTheme'
 import EmojiPicker from '../components/EmojiPicker.vue'
+
+const { isDark } = useTheme()
 
 const route = useRoute()
 const router = useRouter()
@@ -58,13 +61,17 @@ async function insertEmoji(inputRef, emoji, get, set) {
 
 const isAdmin = computed(() => authState.profile?.role === 'admin')
 const currentUserId = computed(() => authState.session?.user.id)
+
+// 收藏状态
+const favorited = ref(false)
+
 // 楼主或管理员可以置顶回答
 const canPin = computed(
   () => isAdmin.value || problem.value?.user_id === currentUserId.value
 )
 
 async function load() {
-  const [{ data: problemData }, { data: commentData }] = await Promise.all([
+  const [{ data: problemData }, { data: commentData }, { data: favData }] = await Promise.all([
     supabase
       .from('problems')
       .select('id, title, content, created_at, user_id, tag_id, difficulty, profiles!problems_user_id_fkey(username), tags(name)')
@@ -75,10 +82,35 @@ async function load() {
       .select('id, content, created_at, user_id, parent_id, images, pinned_at, profiles!comments_user_id_fkey(username)')
       .eq('problem_id', problemId)
       .order('created_at', { ascending: true }),
+    supabase
+      .from('favorites')
+      .select('problem_id')
+      .eq('problem_id', problemId)
+      .eq('user_id', currentUserId.value)
+      .maybeSingle(),
   ])
   problem.value = problemData
   comments.value = commentData ?? []
+  favorited.value = !!favData
   await loadLikes()
+}
+
+async function toggleFavorite() {
+  if (favorited.value) {
+    const { error } = await supabase
+      .from('favorites')
+      .delete()
+      .eq('problem_id', problemId)
+      .eq('user_id', currentUserId.value)
+    if (error) return ElMessage.error(error.message)
+    favorited.value = false
+  } else {
+    const { error } = await supabase
+      .from('favorites')
+      .insert({ problem_id: problemId, user_id: currentUserId.value })
+    if (error) return ElMessage.error(error.message)
+    favorited.value = true
+  }
 }
 
 async function loadLikes() {
@@ -319,8 +351,11 @@ async function removeComment(id) {
         >
           {{ problemLike.liked ? 'Liked' : 'Like' }} {{ problemLike.count }}
         </el-button>
+        <el-button size="small" :type="favorited ? 'warning' : 'default'" @click="toggleFavorite">
+          {{ favorited ? '★ 已收藏' : '☆ 收藏' }}
+        </el-button>
       </div>
-      <MdPreview :modelValue="problem.content" />
+      <MdPreview :modelValue="problem.content" :theme="isDark ? 'dark' : 'light'" />
     </el-card>
 
     <el-card style="margin-top: 16px">
@@ -430,6 +465,7 @@ async function removeComment(id) {
         <div
           v-for="r in c.replies"
           :key="r.id"
+          class="reply-block"
           style="margin: 8px 0 0 36px; padding: 8px 12px; background: var(--el-fill-color-light); border-radius: 6px"
         >
           <div style="display: flex; justify-content: space-between; font-size: 13px">

@@ -26,6 +26,10 @@ const tags = ref([])
 // 用户列表（含学号）
 const users = ref([])
 
+// 本周周报预览文本
+const weeklyText = ref('')
+const publishing = ref(false)
+
 const formatTime = (iso) => new Date(iso).toLocaleString('zh-CN')
 
 async function load() {
@@ -117,7 +121,32 @@ async function load() {
   recentProblems.value = recentPRes.data ?? []
   recentComments.value = recentCRes.data ?? []
   tags.value = tagsRes.data ?? []
+
+  // 周报文本：本周新增 + 活跃榜前三 + 访问峰值
+  const weekP = (weekProblemsRes.data ?? []).length
+  const weekC = (weekCommentsRes.data ?? []).length
+  const top3 = activeUsers.value.slice(0, 3).map((u) => `${u.username}（${u.score}分）`).join('、') || '暂无'
+  const end = new Date()
+  const start = new Date(d7)
+  weeklyText.value =
+    `本周（${start.getMonth() + 1}/${start.getDate()} ~ ${end.getMonth() + 1}/${end.getDate()}）` +
+    `新增题目 ${weekP} 道、讨论 ${weekC} 条；近 14 天单日访客峰值 ${trendMax.value} 人。\n` +
+    `活跃榜前三：${top3}`
   loading.value = false
+}
+
+async function publishWeekly() {
+  publishing.value = true
+  const { error } = await supabase.from('board_items').insert({
+    type: 'notice',
+    title: `本周周报（${new Date().toLocaleDateString('zh-CN')}发布）`,
+    note: weeklyText.value,
+    start_at: new Date().toISOString(),
+    created_by: authState.session.user.id,
+  })
+  publishing.value = false
+  if (error) return ElMessage.error(error.message)
+  ElMessage.success('周报已发布为公告，网站顶部即可看到')
 }
 
 onMounted(load)
@@ -178,6 +207,23 @@ async function toggleRole(u) {
         <div style="color: var(--el-text-color-secondary); font-size: 13px">{{ s.label }}</div>
       </el-card>
     </div>
+
+    <el-row :gutter="12" style="margin-top: 12px">
+      <!-- 本周周报 -->
+      <el-col :span="24">
+        <el-card>
+          <template #header>
+            <div style="display: flex; justify-content: space-between; align-items: center">
+              <span>本周周报预览（每周日发布到公告）</span>
+              <el-button type="primary" size="small" :loading="publishing" @click="publishWeekly">
+                发布为公告
+              </el-button>
+            </div>
+          </template>
+          <div style="white-space: pre-wrap; font-size: 14px">{{ weeklyText }}</div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <el-row :gutter="12" style="margin-top: 12px">
       <!-- 14 天访问趋势（纯 CSS 柱状图） -->
