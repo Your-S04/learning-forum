@@ -193,7 +193,8 @@ returns text as $$
   select value from app_config where key = k;
 $$ language sql security definer stable;
 
--- 通知 1：别人评论你的题目 → 微信推送题目作者
+-- 通知 1：别人顶层评论你的题目 → 微信推送题目作者
+-- 楼中楼回复（parent_id 非空）不在这里处理，由下面的 notify_comment_replied 推给被回复者
 create or replace function public.notify_problem_author()
 returns trigger as $$
 declare
@@ -203,6 +204,7 @@ declare
   v_actor text;
 begin
   if coalesce(v_app_token, '') = '' then return new; end if;
+  if new.parent_id is not null then return new; end if;
   select user_id into v_author from problems where id = new.problem_id;
   if v_author is null or v_author = new.user_id then return new; end if;
   select pusher_uid into v_uid from push_tokens where user_id = v_author;
@@ -226,6 +228,77 @@ $$ language plpgsql security definer;
 drop trigger if exists notify_comment on comments;
 create trigger notify_comment after insert on comments
   for each row execute function public.notify_problem_author();
+
+-- 通知 1.1：楼中楼回复了你的评论 → 微信推送被回复的评论作者
+create or replace function public.notify_comment_replied()
+returns trigger as $$
+declare
+  v_app_token text := public.get_app_config('wxpusher_app_token');
+  v_parent_author uuid;
+  v_uid text;
+  v_actor text;
+begin
+  if coalesce(v_app_token, '') = '' then return new; end if;
+  if new.parent_id is null then return new; end if;
+  select user_id into v_parent_author from comments where id = new.parent_id;
+  if v_parent_author is null or v_parent_author = new.user_id then return new; end if;
+  select pusher_uid into v_uid from push_tokens where user_id = v_parent_author;
+  if v_uid is null or v_uid = '' then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  perform net.http_post(
+    url := 'https://wxpusher.zjiecode.com/api/send/message',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object(
+      'appToken', v_app_token,
+      'uids', jsonb_build_array(v_uid),
+      'summary', '【学习论坛】' || coalesce(v_actor, '有人') || ' 回复了你的评论',
+      'content', coalesce(v_actor, '有人') || ' 回复了你的评论：' || left(new.content, 300),
+      'contentType', 1
+    )
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists notify_comment_reply on comments;
+create trigger notify_comment_reply after insert on comments
+  for each row execute function public.notify_comment_replied();
+
+-- 通知 1.2：你的评论被点赞 → 微信推送评论作者
+create or replace function public.notify_comment_liked()
+returns trigger as $$
+declare
+  v_app_token text := public.get_app_config('wxpusher_app_token');
+  v_comment_author uuid;
+  v_content text;
+  v_uid text;
+  v_actor text;
+begin
+  if coalesce(v_app_token, '') = '' then return new; end if;
+  select user_id, content into v_comment_author, v_content
+    from comments where id = new.comment_id;
+  if v_comment_author is null or v_comment_author = new.user_id then return new; end if;
+  select pusher_uid into v_uid from push_tokens where user_id = v_comment_author;
+  if v_uid is null or v_uid = '' then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  perform net.http_post(
+    url := 'https://wxpusher.zjiecode.com/api/send/message',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object(
+      'appToken', v_app_token,
+      'uids', jsonb_build_array(v_uid),
+      'summary', '【学习论坛】' || coalesce(v_actor, '有人') || ' 赞了你的回复',
+      'content', coalesce(v_actor, '有人') || ' 赞了你的回复：' || left(v_content, 200),
+      'contentType', 1
+    )
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists notify_comment_like on comment_likes;
+create trigger notify_comment_like after insert on comment_likes
+  for each row execute function public.notify_comment_liked();
 
 -- 通知 2：别人点赞你的题目 → 微信推送题目作者
 create or replace function public.notify_problem_liked()
