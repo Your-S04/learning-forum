@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { MdEditor } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { supabase } from '../lib/supabase'
+import { uploadProblemImage } from '../lib/image'
 import { authState } from '../composables/useAuth'
 
 const route = useRoute()
@@ -54,18 +55,12 @@ async function ensureTagId(value) {
   return exist?.id ?? null
 }
 
-// md-editor-v3 的图片上传：存入 Supabase Storage 的 images 桶，拿回公网 URL
+// md-editor-v3 的图片上传：压缩到 1600px 再入库，省流量省存储
 async function onUploadImg(files, callback) {
   const urls = []
   for (const file of files) {
-    const path = `${Date.now()}-${file.name}`
-    const { error } = await supabase.storage.from('images').upload(path, file)
-    if (error) {
-      ElMessage.error(`图片上传失败：${error.message}`)
-      continue
-    }
-    const { data } = supabase.storage.from('images').getPublicUrl(path)
-    urls.push(data.publicUrl)
+    const url = await uploadProblemImage(file)
+    if (url) urls.push(url)
   }
   callback(urls)
 }

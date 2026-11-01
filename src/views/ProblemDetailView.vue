@@ -372,14 +372,15 @@ async function removeComment(id) {
         </div>
         <p v-if="c.content" style="white-space: pre-wrap; margin: 8px 0">{{ c.content }}</p>
 
-        <!-- 评论配图：显示压缩图，可下载原图 -->
+        <!-- 评论配图：网格显示 480px 缩略图，点击放大才加载原图 -->
         <div v-if="c.images?.length" style="display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0">
           <div v-for="(img, i) in c.images" :key="i" style="text-align: center">
             <el-image
               :src="img.thumb"
-              :preview-src-list="[img.thumb]"
+              :preview-src-list="[img.original]"
               fit="cover"
               preview-teleported
+              lazy
               style="width: 120px; height: 120px; border-radius: 4px"
             />
             <div>
