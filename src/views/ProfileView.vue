@@ -21,6 +21,49 @@ async function loadFavorites() {
 
 onMounted(loadFavorites)
 
+// 微信推送（WxPusher）：每人存自己的 UID，别人评论我的题目时微信提醒我
+const pusherUid = ref('')
+const pushSaved = ref(false)
+const savingPush = ref(false)
+
+onMounted(async () => {
+  const { data } = await supabase
+    .from('push_tokens')
+    .select('pusher_uid')
+    .eq('user_id', authState.session.user.id)
+    .maybeSingle()
+  if (data) {
+    pusherUid.value = data.pusher_uid
+    pushSaved.value = true
+  }
+})
+
+async function savePushUid() {
+  const uid = pusherUid.value.trim()
+  if (!uid.startsWith('UID_')) {
+    return ElMessage.warning('UID 以 UID_ 开头，请从 WxPusher 公众号复制完整的 UID')
+  }
+  savingPush.value = true
+  const { error } = await supabase
+    .from('push_tokens')
+    .upsert({ user_id: authState.session.user.id, pusher_uid: uid })
+  savingPush.value = false
+  if (error) return ElMessage.error(error.message)
+  pushSaved.value = true
+  ElMessage.success('已开启微信推送')
+}
+
+async function disablePush() {
+  const { error } = await supabase
+    .from('push_tokens')
+    .delete()
+    .eq('user_id', authState.session.user.id)
+  if (error) return ElMessage.error(error.message)
+  pusherUid.value = ''
+  pushSaved.value = false
+  ElMessage.success('已关闭微信推送')
+}
+
 async function removeFavorite(item) {
   const { error } = await supabase
     .from('favorites')
@@ -113,6 +156,22 @@ async function submit() {
     <div v-if="!favorites.length" style="color: var(--el-text-color-secondary); font-size: 13px">
       还没有收藏，在题目详情页点"☆ 收藏"即可保存
     </div>
+
+    <el-divider />
+    <h3>微信推送（可选）</h3>
+    <p style="color: var(--el-text-color-secondary); font-size: 13px; margin-top: 0">
+      开启后，别人回复你的题目时你会收到微信通知（免费、无需注册账号）。获取 UID：
+      在微信里关注公众号「wxpusher」（或扫描本论坛应用的二维码）→ 公众号菜单里查看你的
+      <strong>UID</strong>（UID_ 开头）→ 复制粘贴到下面。
+    </p>
+    <div style="display: flex; gap: 8px">
+      <el-input v-model="pusherUid" placeholder="粘贴你的 UID（UID_ 开头）" />
+      <el-button type="primary" :loading="savingPush" @click="savePushUid">保存</el-button>
+      <el-button v-if="pushSaved" @click="disablePush">关闭推送</el-button>
+    </div>
+    <el-tag v-if="pushSaved" type="success" size="small" style="margin-top: 8px">
+      已开启：有人回复你的题目会推送到微信
+    </el-tag>
 
     <el-divider />
     <h3>修改密码</h3>

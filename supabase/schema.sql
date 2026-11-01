@@ -169,6 +169,52 @@ create policy "favorites read own"   on favorites for select to authenticated us
 create policy "favorites insert own" on favorites for insert to authenticated with check (auth.uid() = user_id);
 create policy "favorites delete own" on favorites for delete to authenticated using (auth.uid() = user_id);
 
+-- 7. WxPusher 微信推送：每人存自己的 UID（不注册账号、无实名、免费）
+-- appToken 不入库（放在触发器函数体里，见部署时的迁移 SQL），UID 严格只有本人可读写
+create table push_tokens (
+  user_id uuid primary key references profiles(id) on delete cascade,
+  pusher_uid text not null,            -- UID_ 开头，同学从 WxPusher 公众号复制
+  created_at timestamptz not null default now()
+);
+alter table push_tokens enable row level security;
+create policy "push tokens own" on push_tokens for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- 通知：别人评论你的题目时，给你推微信（自己评论自己不推，没填 UID 不推）
+-- 注意：本文件里 appToken 是占位符，部署时用迁移 SQL 覆盖为真实值
+create or replace function public.notify_problem_author()
+returns trigger as $$
+declare
+  v_app_token text := 'AT_你的appToken';
+  v_author uuid;
+  v_uid text;
+  v_actor text;
+begin
+  if v_app_token = 'AT_你的appToken' then return new; end if;
+  select user_id into v_author from problems where id = new.problem_id;
+  if v_author is null or v_author = new.user_id then return new; end if;
+  select pusher_uid into v_uid from push_tokens where user_id = v_author;
+  if v_uid is null or v_uid = '' then return new; end if;
+  select username into v_actor from profiles where id = new.user_id;
+  perform net.http_post(
+    url := 'https://wxpusher.zjiecode.com/api/send/message',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body := jsonb_build_object(
+      'appToken', v_app_token,
+      'uids', jsonb_build_array(v_uid),
+      'summary', '【学习论坛】' || coalesce(v_actor, '有人') || ' 回复了你的题目',
+      'content', coalesce(v_actor, '有人') || ' 回复了你的题目：' || left(new.content, 300),
+      'contentType', 1
+    )
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists notify_comment on comments;
+create trigger notify_comment after insert on comments
+  for each row execute function public.notify_problem_author();
+
 -- comments：人人可读；本人可发；本人/题目楼主/管理员可改（用于置顶）；本人或管理员可删
 create policy "comments read"   on comments for select to authenticated using (true);
 create policy "comments insert" on comments for insert to authenticated with check (auth.uid() = user_id);
