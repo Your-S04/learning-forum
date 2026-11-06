@@ -52,7 +52,7 @@ onMounted(load)
         <el-card>
           <h2 style="margin-top: 0">贡献排行榜</h2>
           <p style="color: var(--el-text-color-secondary); margin-top: 0; font-size: 13px">
-            发布题目 +3，回复讨论 +1，收到点赞 +2，回答被置顶 +2
+            发布题目 +3，回复讨论 +1，收到点赞 +0.5，回答被置顶 +2
           </p>
           <el-table :data="contributors">
             <el-table-column type="index" label="排名" width="70" />

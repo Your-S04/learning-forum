@@ -98,16 +98,16 @@ create table comment_likes (
   primary key (comment_id, user_id)
 );
 
--- 5. 排行榜视图：发题 3 + 回复 1 + 获赞 2 + 被置顶 2（改规则只改这里）
+-- 5. 排行榜视图：发题 3 + 回复 1 + 获赞 0.5 + 被置顶 2
 -- 仅排除运营者账号 admin@youforum.local（其学号为 admin），其他管理员正常参与
 create or replace view leaderboard as
 select p.id, p.username,
   (select count(*) from problems where user_id = p.id) * 3 +
   (select count(*) from comments where user_id = p.id) * 1 +
   (select count(*) from problem_likes pl join problems pr on pr.id = pl.problem_id
-     where pr.user_id = p.id) * 2 +
+     where pr.user_id = p.id) * 0.5 +
   (select count(*) from comment_likes cl join comments c on c.id = cl.comment_id
-     where c.user_id = p.id) * 2 +
+     where c.user_id = p.id) * 0.5 +
   (select count(*) from comments where user_id = p.id and pinned_at is not null) * 2
   as score
 from profiles p
