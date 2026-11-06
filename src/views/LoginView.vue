@@ -1,4 +1,11 @@
 <script setup>
+import { ElAlert, ElButton, ElCard, ElForm, ElFormItem, ElInput } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
+import 'element-plus/es/components/input/style/css'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { signIn } from '../composables/useAuth'

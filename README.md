@@ -13,8 +13,8 @@ npm run dev
 
 ## 一次性配置（详见 WORKFLOW.md）
 
-1. **Supabase 建库**：Dashboard → SQL Editor → 粘贴 [supabase/schema.sql](supabase/schema.sql) 全部内容 → Run。
-2. **预建账号**：Dashboard → Authentication → Users → Add user，Email 填 `学号@youforum.local`（如 `stu001@youforum.local`），密码统一如 `You123456`。
+1. **Supabase 建库**：Dashboard → SQL Editor → 先执行 [supabase/schema.sql](supabase/schema.sql)，再执行 [权限加固迁移](supabase/migrations/202611060001_harden_forum.sql)。已有数据库只执行迁移，并在发布新版前端前完成。
+2. **预建账号**：在 Supabase Auth 设置中关闭公开注册和匿名登录。通过 Dashboard → Authentication → Users → Add user 建号，Email 填 `学号@youforum.local`（如 `stu001@youforum.local`），为每人生成独立的随机初始密码。如果之前发过统一密码，重置受影响的账号。
 3. **设管理员**：SQL Editor 执行
    ```sql
    update profiles set role = 'admin' where username = '学号';

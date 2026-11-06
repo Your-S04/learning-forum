@@ -1,6 +1,7 @@
 // 图片处理工具：浏览器端压缩 + 上传到 Supabase Storage
 // 省流量策略：页面一律显示小缩略图（480px），点开预览/下载原图才加载大文件
 import { ElMessage } from 'element-plus'
+import 'element-plus/es/components/message/style/css'
 import { supabase } from './supabase'
 
 // 用 canvas 把图片等比缩到最长边 maxEdge 以内，输出 JPEG

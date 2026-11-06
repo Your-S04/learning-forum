@@ -1,4 +1,12 @@
 <script setup>
+import { ElCard, ElCol, ElRow, ElTable, ElTableColumn, ElTag, ElLoadingDirective as vLoading } from 'element-plus'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/col/style/css'
+import 'element-plus/es/components/row/style/css'
+import 'element-plus/es/components/table/style/css'
+import 'element-plus/es/components/table-column/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/loading/style/css'
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase'
 import { authState } from '../composables/useAuth'

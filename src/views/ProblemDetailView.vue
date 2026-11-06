@@ -1,7 +1,18 @@
 <script setup>
+import { ElButton, ElCard, ElEmpty, ElImage, ElInput, ElRadioButton, ElRadioGroup, ElRate, ElTag, ElMessage, ElMessageBox } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/empty/style/css'
+import 'element-plus/es/components/image/style/css'
+import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/radio-button/style/css'
+import 'element-plus/es/components/radio-group/style/css'
+import 'element-plus/es/components/rate/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/message-box/style/css'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/style.css'
 import { supabase } from '../lib/supabase'
@@ -217,12 +228,12 @@ async function toggleCommentLike(comment) {
 
 async function togglePin(comment) {
   const pinned = !comment.pinned_at
-  const { error } = await supabase
-    .from('comments')
-    .update({ pinned_at: pinned ? new Date().toISOString() : null })
-    .eq('id', comment.id)
+  const { data, error } = await supabase.rpc('set_comment_pin', {
+    p_comment_id: comment.id,
+    p_pinned: pinned,
+  })
   if (error) return ElMessage.error(error.message)
-  comment.pinned_at = pinned ? new Date().toISOString() : null
+  comment.pinned_at = data
   ElMessage.success(pinned ? '已置顶' : '已取消置顶')
 }
 

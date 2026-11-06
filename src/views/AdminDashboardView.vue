@@ -1,7 +1,17 @@
 <script setup>
+import { ElButton, ElCard, ElCol, ElRow, ElTable, ElTableColumn, ElTag, ElMessage, ElMessageBox, ElLoadingDirective as vLoading } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/col/style/css'
+import 'element-plus/es/components/row/style/css'
+import 'element-plus/es/components/table/style/css'
+import 'element-plus/es/components/table-column/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/message/style/css'
+import 'element-plus/es/components/message-box/style/css'
+import 'element-plus/es/components/loading/style/css'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { supabase } from '../lib/supabase'
 import { authState } from '../composables/useAuth'
 

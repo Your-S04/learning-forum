@@ -1,4 +1,7 @@
 <script setup>
+import { ElButton, ElPopover } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/popover/style/css'
 // 轻量 emoji 选择器：点击任意 emoji 通过 select 事件抛出
 const emit = defineEmits(['select'])
 

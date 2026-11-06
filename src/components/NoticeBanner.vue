@@ -1,4 +1,8 @@
 <script setup>
+import { ElAlert, ElButton, ElTag } from 'element-plus'
+import 'element-plus/es/components/alert/style/css'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/tag/style/css'
 // 顶部公告横幅：管理员公告 + 48 小时内截止的作业/考试
 // 收起状态存 localStorage（按内容 id 记），同一批收起后不再打扰
 import { ref, computed, onMounted } from 'vue'

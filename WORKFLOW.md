@@ -151,7 +151,7 @@ create policy "admin write" on board_items for all to authenticated using (
 
 Supabase Dashboard → **Authentication → Users → Add user → Create new user**：
 - Email 填学号风格的地址，如 `stu001@youforum.local`（这个域名收不到邮件也没关系，密码登录不依赖真实邮箱）
-- Password 统一设成 `You123456`（你的固定初始密码）
+- Password 为每个账号单独生成随机初始密码。在 Auth 设置中关闭公开注册与匿名登录。
 - Display name 填真实姓名
 
 需要管理员时，SQL Editor 执行：

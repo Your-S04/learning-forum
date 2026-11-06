@@ -12,29 +12,31 @@ async function loadProfile(session) {
   if (!session) return null
   const { data } = await supabase
     .from('profiles')
-    .select('*')
+    .select('username, role')
     .eq('id', session.user.id)
     .single()
   return data
 }
 
-export async function initAuth() {
+export function initAuth() {
+  let requestId = 0
   const {
     data: { subscription },
-  } = await supabase.auth.onAuthStateChange((_event, session) => {
+  } = supabase.auth.onAuthStateChange((_event, session) => {
     // 用 setTimeout 避免在回调里同步调用 supabase 查询造成死锁
     setTimeout(async () => {
+      const previousUserId = authState.session?.user.id
       authState.session = session
-      authState.profile = await loadProfile(session)
+      if (session?.user.id === previousUserId && requestId !== 0) return
+
+      const id = ++requestId
+      authState.profile = null
+      const profile = await loadProfile(session)
+      if (id !== requestId) return
+      authState.profile = profile
+      authState.ready = true
     }, 0)
   })
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  authState.session = session
-  authState.profile = await loadProfile(session)
-  authState.ready = true
 
   return subscription
 }

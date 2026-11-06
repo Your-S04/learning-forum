@@ -1,7 +1,15 @@
 <script setup>
+import { ElButton, ElCard, ElDivider, ElForm, ElFormItem, ElInput, ElTag, ElMessage } from 'element-plus'
+import 'element-plus/es/components/button/style/css'
+import 'element-plus/es/components/card/style/css'
+import 'element-plus/es/components/divider/style/css'
+import 'element-plus/es/components/form/style/css'
+import 'element-plus/es/components/form-item/style/css'
+import 'element-plus/es/components/input/style/css'
+import 'element-plus/es/components/tag/style/css'
+import 'element-plus/es/components/message/style/css'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { authState, changePassword } from '../composables/useAuth'
 import { supabase } from '../lib/supabase'
 
